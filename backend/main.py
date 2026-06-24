@@ -7,14 +7,15 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .calculations import AccountValue, LiabilityValue, TrustValue, calculate_household_summary, calculate_sacs
 from .database import SessionLocal, create_db, get_db
-from .models import Account, Client, GeneratedReport, HouseholdMember, Liability, ReportRun, TrustAsset
+from .models import Account, Client, GeneratedReport, HouseholdMember, Liability, ReportRun, TrustAsset, new_id, utc_now
 from .pdf import file_size, generate_sacs_pdf, generate_tcc_pdf, report_paths
 from .schemas import (
+    ClientCreate,
     ClientDetail,
     ClientListItem,
     ClientListResponse,
@@ -43,6 +44,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "http://localhost:5176",
+        "http://127.0.0.1:5176",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -236,9 +239,7 @@ def submitted_ids(items: list, label: str) -> set[str]:
     return set(ids)
 
 
-@app.put("/api/clients/{client_id}", response_model=ClientDetail)
-def update_client(client_id: str, payload: ClientUpdate, db: Session = Depends(get_db)) -> ClientDetail:
-    client = load_client(db, client_id)
+def apply_client_payload(db: Session, client: Client, payload: ClientUpdate) -> None:
     client.household_name = clean_required(payload.household_name, "Household name")
     client.status = clean_required(payload.status, "Status")
     client.last_report_date = payload.last_report_date
@@ -320,6 +321,51 @@ def update_client(client_id: str, payload: ClientUpdate, db: Session = Depends(g
         asset.value = item.value
         asset.as_of_date = item.as_of_date
 
+
+def create_client_row(db: Session, payload: ClientCreate) -> Client:
+    values = {
+        "id": new_id(),
+        "household_name": clean_required(payload.household_name, "Household name"),
+        "primary_contact": f"{clean_required(payload.primary_first_name, 'Primary first name')} {clean_required(payload.primary_last_name, 'Primary last name')}",
+        "status": clean_required(payload.status, "Status"),
+        "last_report_date": payload.last_report_date,
+        "notes": payload.notes.strip(),
+        "created_at": utc_now(),
+    }
+    table_info = db.execute(text("PRAGMA table_info(clients)")).all()
+    columns = [row[1] for row in table_info]
+    legacy_defaults = {
+        "tier": "Standard",
+        "assigned_team_member": "",
+        "next_meeting_date": None,
+    }
+    for column, value in legacy_defaults.items():
+        if column in columns:
+            values[column] = value
+
+    insert_columns = [column for column in values if column in columns]
+    db.execute(
+        text(
+            f"INSERT INTO clients ({', '.join(insert_columns)}) "
+            f"VALUES ({', '.join(f':{column}' for column in insert_columns)})"
+        ),
+        {column: values[column] for column in insert_columns},
+    )
+    return load_client(db, values["id"])
+
+
+@app.post("/api/clients", response_model=ClientDetail, status_code=201)
+def create_client(payload: ClientCreate, db: Session = Depends(get_db)) -> ClientDetail:
+    client = create_client_row(db, payload)
+    apply_client_payload(db, client, payload)
+    db.commit()
+    return detail_out(load_client(db, client.id))
+
+
+@app.put("/api/clients/{client_id}", response_model=ClientDetail)
+def update_client(client_id: str, payload: ClientUpdate, db: Session = Depends(get_db)) -> ClientDetail:
+    client = load_client(db, client_id)
+    apply_client_payload(db, client, payload)
     db.commit()
     return detail_out(load_client(db, client.id))
 

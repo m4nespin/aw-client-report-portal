@@ -170,7 +170,8 @@ button:disabled {
   letter-spacing: 0;
 }
 
-.section-heading > span {
+.section-heading > span,
+.record-count {
   color: var(--muted);
   font-weight: 700;
 }

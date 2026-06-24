@@ -154,6 +154,10 @@ class ClientUpdate(BaseModel):
     trust_assets: list[TrustAssetClientUpdate] = Field(default_factory=list)
 
 
+class ClientCreate(ClientUpdate):
+    pass
+
+
 class BalanceUpdate(BaseModel):
     id: str
     balance: float = Field(ge=0)

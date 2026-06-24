@@ -1,4 +1,5 @@
 from datetime import date
+from math import atan2, cos, sin
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -17,6 +18,17 @@ LINE = colors.HexColor("#d7e0ea")
 SOFT_BLUE = colors.HexColor("#e8f2fb")
 GREEN = colors.HexColor("#2f8a3c")
 RED = colors.HexColor("#d94124")
+
+SACS_GREEN = colors.HexColor("#55b960")
+SACS_GREEN_DARK = colors.HexColor("#22773a")
+SACS_RED = colors.HexColor("#ef513c")
+SACS_RED_DARK = colors.HexColor("#a62d1d")
+SACS_BLUE = colors.HexColor("#4c8ed0")
+SACS_NAVY = colors.HexColor("#173556")
+SACS_LIGHT_BLUE = colors.HexColor("#b7d8ee")
+SACS_ARROW_BLUE = colors.HexColor("#7e9ec0")
+SACS_GOLD = colors.HexColor("#e5a82b")
+SACS_PINK = colors.HexColor("#f3a6a9")
 
 
 def fmt_money(value: float) -> str:
@@ -118,51 +130,236 @@ def draw_note(canvas: Canvas, x: float, y: float, text: str) -> None:
         canvas.drawString(x, y, line)
 
 
+def draw_centered(canvas: Canvas, x: float, y: float, text: str, size: int = 10, bold: bool = False, color=INK) -> None:
+    set_font(canvas, size, bold, color)
+    canvas.drawCentredString(x, y, text)
+
+
+def draw_sacs_header(canvas: Canvas, client: Client, run: ReportRun, show_client: bool = True) -> None:
+    draw_centered(canvas, PAGE_WIDTH / 2, PAGE_HEIGHT - 42, "Simple Automated Cashflow System (SACS)", 17, True)
+    if show_client:
+        draw_centered(canvas, PAGE_WIDTH / 2, PAGE_HEIGHT - 76, clean(client.household_name, 48), 13, True)
+    set_font(canvas, 8, False, MUTED)
+    canvas.drawRightString(PAGE_WIDTH - 38, 28, f"{run.quarter} / {fmt_date(run.meeting_date)}")
+
+
+def draw_arrow(
+    canvas: Canvas,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    color,
+    width: float = 3,
+    head_length: float = 14,
+    head_width: float = 10,
+    dashed: bool = False,
+) -> None:
+    angle = atan2(end_y - start_y, end_x - start_x)
+    shaft_end_x = end_x - cos(angle) * head_length
+    shaft_end_y = end_y - sin(angle) * head_length
+    perp_x = -sin(angle) * head_width / 2
+    perp_y = cos(angle) * head_width / 2
+
+    canvas.saveState()
+    canvas.setStrokeColor(color)
+    canvas.setFillColor(color)
+    canvas.setLineWidth(width)
+    if dashed:
+        canvas.setDash(4, 3)
+    canvas.line(start_x, start_y, shaft_end_x, shaft_end_y)
+    canvas.setDash()
+    path = canvas.beginPath()
+    path.moveTo(end_x, end_y)
+    path.lineTo(shaft_end_x + perp_x, shaft_end_y + perp_y)
+    path.lineTo(shaft_end_x - perp_x, shaft_end_y - perp_y)
+    path.close()
+    canvas.drawPath(path, stroke=1, fill=1)
+    canvas.restoreState()
+
+
+def draw_double_arrow(canvas: Canvas, start_x: float, start_y: float, end_x: float, end_y: float, color) -> None:
+    draw_arrow(canvas, start_x, start_y, end_x, end_y, color, width=8, head_length=17, head_width=18)
+    draw_arrow(canvas, end_x, end_y, start_x, start_y, color, width=8, head_length=17, head_width=18)
+
+
+def draw_value_band(canvas: Canvas, center_x: float, center_y: float, width: float, height: float, value: str) -> None:
+    canvas.setFillColor(colors.white)
+    canvas.setStrokeColor(colors.HexColor("#d9e2eb"))
+    canvas.roundRect(center_x - width / 2, center_y - height / 2, width, height, 1.5, stroke=True, fill=True)
+    font_size = 13
+    while canvas.stringWidth(value, "Helvetica", font_size) > width - 9 and font_size > 8:
+        font_size -= 1
+    draw_centered(canvas, center_x, center_y - 4, value, font_size, False, colors.HexColor("#9aa5ad"))
+
+
+def draw_floor(canvas: Canvas, center_x: float, center_y: float, radius: float) -> None:
+    y = center_y - radius + 26
+    canvas.setStrokeColor(colors.HexColor("#202020"))
+    canvas.setLineWidth(1.5)
+    canvas.line(center_x - radius + 12, y + 8, center_x + radius - 12, y + 13)
+    draw_centered(canvas, center_x, y - 4, "$1,000 Floor", 7, True, colors.HexColor("#1d1d1d"))
+
+
+def draw_circle_node(canvas: Canvas, center_x: float, center_y: float, radius: float, fill_color, title: str, value: str) -> None:
+    canvas.setFillColor(fill_color)
+    canvas.setStrokeColor(colors.HexColor("#273647"))
+    canvas.setLineWidth(2)
+    canvas.circle(center_x, center_y, radius, stroke=True, fill=True)
+    draw_centered(canvas, center_x, center_y + 36, title, 15, True, colors.white)
+    draw_value_band(canvas, center_x, center_y - 2, radius * 1.18, 26, value)
+    draw_floor(canvas, center_x, center_y, radius)
+
+
+def draw_account_circle(
+    canvas: Canvas,
+    center_x: float,
+    center_y: float,
+    radius: float,
+    fill_color,
+    title_lines: list[str],
+    value: str,
+) -> None:
+    canvas.setFillColor(fill_color)
+    canvas.setStrokeColor(colors.HexColor("#273647"))
+    canvas.setLineWidth(2)
+    canvas.circle(center_x, center_y, radius, stroke=True, fill=True)
+    title_y = center_y + 34
+    for line in title_lines:
+        draw_centered(canvas, center_x, title_y, line, 12, True, colors.white)
+        title_y -= 26
+    draw_value_band(canvas, center_x, center_y - 30, radius * 1.16, 24, value)
+
+
+def draw_private_reserve_node(canvas: Canvas, center_x: float, center_y: float, radius: float, value: str) -> None:
+    canvas.setFillColor(SACS_BLUE)
+    canvas.setStrokeColor(colors.HexColor("#263b5f"))
+    canvas.setLineWidth(2)
+    canvas.circle(center_x, center_y, radius, stroke=True, fill=True)
+    draw_centered(canvas, center_x, center_y + 48, "PRIVATE", 13, True, colors.white)
+    draw_centered(canvas, center_x, center_y + 20, "RESERVE", 13, True, colors.white)
+    draw_value_band(canvas, center_x, center_y - 8, radius * 1.1, 23, value)
+    draw_piggy_bank(canvas, center_x, center_y - 44)
+
+
+def draw_piggy_bank(canvas: Canvas, center_x: float, center_y: float) -> None:
+    canvas.saveState()
+    canvas.setFillColor(SACS_GOLD)
+    canvas.setStrokeColor(SACS_GOLD)
+    for offset_x, height in [(-35, 20), (-22, 30), (24, 32), (38, 20)]:
+        canvas.roundRect(center_x + offset_x, center_y - 24, 10, height, 2, stroke=False, fill=True)
+    for offset_x, offset_y, radius in [(-16, 23, 3), (-5, 32, 4), (8, 21, 3)]:
+        canvas.circle(center_x + offset_x, center_y + offset_y, radius, stroke=False, fill=True)
+
+    canvas.setFillColor(SACS_PINK)
+    canvas.setStrokeColor(colors.HexColor("#cf6d73"))
+    canvas.ellipse(center_x - 24, center_y - 14, center_x + 26, center_y + 18, stroke=True, fill=True)
+    canvas.circle(center_x + 27, center_y + 5, 12, stroke=True, fill=True)
+    canvas.setFillColor(colors.HexColor("#f7c4c5"))
+    canvas.circle(center_x + 34, center_y + 4, 5, stroke=False, fill=True)
+    canvas.setFillColor(colors.HexColor("#6e3d43"))
+    canvas.circle(center_x + 24, center_y + 9, 1.4, stroke=False, fill=True)
+    canvas.setStrokeColor(colors.HexColor("#cf6d73"))
+    canvas.setLineWidth(2)
+    canvas.line(center_x - 11, center_y - 14, center_x - 11, center_y - 22)
+    canvas.line(center_x + 13, center_y - 14, center_x + 13, center_y - 22)
+    canvas.line(center_x - 2, center_y + 18, center_x + 9, center_y + 25)
+    canvas.restoreState()
+
+
+def draw_papers_icon(canvas: Canvas, x: float, y: float) -> None:
+    canvas.saveState()
+    canvas.translate(x, y)
+    canvas.rotate(-16)
+    for offset in [0, 10, 20]:
+        canvas.setFillColor(colors.HexColor("#f2f3f5"))
+        canvas.setStrokeColor(colors.HexColor("#c7ccd2"))
+        canvas.rect(offset, -offset / 2, 38, 54, stroke=True, fill=True)
+        canvas.setStrokeColor(colors.HexColor("#9aa1aa"))
+        canvas.line(offset + 8, 38 - offset / 2, offset + 30, 38 - offset / 2)
+        canvas.line(offset + 8, 29 - offset / 2, offset + 30, 29 - offset / 2)
+    canvas.restoreState()
+
+
+def draw_income_arrow(canvas: Canvas) -> None:
+    canvas.saveState()
+    canvas.setFillColor(SACS_GREEN)
+    canvas.setStrokeColor(colors.HexColor("#273647"))
+    path = canvas.beginPath()
+    path.moveTo(70, 655)
+    path.lineTo(94, 634)
+    path.lineTo(87, 628)
+    path.lineTo(118, 607)
+    path.lineTo(101, 644)
+    path.lineTo(94, 638)
+    path.lineTo(70, 659)
+    path.close()
+    canvas.drawPath(path, stroke=True, fill=True)
+    canvas.restoreState()
+
+
+def draw_sacs_page_one(canvas: Canvas, client: Client, run: ReportRun, sacs: dict) -> None:
+    draw_sacs_header(canvas, client, run)
+    inflow_x, flow_y, radius = 160, 568, 76
+    outflow_x = 452
+    reserve_x, reserve_y, reserve_radius = PAGE_WIDTH / 2, 330, 74
+    excess = float(sacs["excess_transfer"])
+    transfer_color = SACS_GREEN_DARK if excess >= 0 else SACS_RED_DARK
+
+    set_font(canvas, 36, True, SACS_GREEN_DARK)
+    canvas.drawString(34, PAGE_HEIGHT - 77, "$")
+    set_font(canvas, 8, True, SACS_GREEN)
+    canvas.drawString(26, PAGE_HEIGHT - 101, "Monthly inflow")
+    canvas.drawString(26, PAGE_HEIGHT - 116, "Household sources")
+    draw_income_arrow(canvas)
+
+    draw_circle_node(canvas, inflow_x, flow_y, radius, SACS_GREEN, "INFLOW", fmt_money(sacs["monthly_inflow"]))
+    draw_circle_node(canvas, outflow_x, flow_y, radius, SACS_RED, "OUTFLOW", fmt_money(sacs["monthly_outflow"]))
+
+    draw_arrow(canvas, inflow_x + radius + 8, flow_y + 13, outflow_x - radius - 8, flow_y + 13, SACS_RED, 2.1, 15, 11)
+    draw_centered(canvas, PAGE_WIDTH / 2, flow_y + 34, f"X = {fmt_money(sacs['monthly_outflow'])}/month", 8, True, SACS_RED_DARK)
+    draw_centered(canvas, PAGE_WIDTH / 2, flow_y - 16, "Automated transfer on the 28th", 5, False, colors.HexColor("#303a44"))
+
+    draw_papers_icon(canvas, PAGE_WIDTH - 126, PAGE_HEIGHT - 86)
+    set_font(canvas, 7, True, colors.HexColor("#303a44"))
+    canvas.drawString(PAGE_WIDTH - 105, PAGE_HEIGHT - 139, "X = Monthly")
+    canvas.drawString(PAGE_WIDTH - 95, PAGE_HEIGHT - 150, "Expenses")
+    canvas.setStrokeColor(colors.HexColor("#303a44"))
+    canvas.setLineWidth(1.8)
+    canvas.line(PAGE_WIDTH - 88, PAGE_HEIGHT - 153, PAGE_WIDTH - 88, flow_y)
+    draw_arrow(canvas, PAGE_WIDTH - 88, flow_y, outflow_x + radius - 16, flow_y, colors.HexColor("#303a44"), 1.8, 10, 8)
+
+    draw_arrow(canvas, inflow_x, flow_y - radius - 3, reserve_x - reserve_radius + 20, reserve_y + 28, SACS_ARROW_BLUE, 2.2, 17, 13)
+    draw_centered(canvas, 214, 417, f"{fmt_money(excess)}/mo", 8, True, transfer_color)
+
+    draw_private_reserve_node(canvas, reserve_x, reserve_y, reserve_radius, fmt_money(sacs["private_reserve_balance"]))
+    draw_centered(canvas, PAGE_WIDTH / 2, reserve_y - reserve_radius - 34, "MONTHLY CASHFLOW", 10, True)
+
+
+def draw_sacs_page_two(canvas: Canvas, client: Client, run: ReportRun, sacs: dict) -> None:
+    draw_sacs_header(canvas, client, run, show_client=False)
+    canvas.setStrokeColor(colors.HexColor("#a8b8ce"))
+    canvas.setLineWidth(1.4)
+    canvas.setDash(5, 5)
+    canvas.line(PAGE_WIDTH / 2, PAGE_HEIGHT - 94, PAGE_WIDTH / 2, 435)
+    canvas.setDash()
+
+    left_x, right_x, center_y, radius = 205, 410, 564, 76
+    draw_account_circle(canvas, left_x, center_y, radius, SACS_LIGHT_BLUE, ["FICA", "ACCOUNT"], fmt_money(sacs["private_reserve_target"]))
+    draw_account_circle(canvas, right_x, center_y, radius, SACS_NAVY, ["INVESTMENT", "ACCOUNT"], f"{fmt_money(run.investment_account_balance)}+")
+    draw_double_arrow(canvas, left_x + radius - 5, center_y, right_x - radius + 5, center_y, SACS_ARROW_BLUE)
+    draw_centered(canvas, left_x, center_y - radius - 25, "6X Monthly Expenses + Deductibles", 7, False)
+    draw_centered(canvas, right_x, center_y - radius - 25, "Remainder", 7, False)
+    draw_centered(canvas, PAGE_WIDTH / 2, 112, "LONG TERM CASHFLOW", 10, True)
+    draw_centered(canvas, PAGE_WIDTH / 2, 82, "(Magnified Private Reserve Cashflow)", 10, True, SACS_BLUE)
+
+
 def generate_sacs_pdf(client: Client, run: ReportRun, snapshot: dict, output_path: Path) -> None:
     sacs = snapshot["sacs"]
     canvas = Canvas(str(output_path), pagesize=letter)
-    draw_header(canvas, client, "SACS Cash Flow Summary", run, "Page 1 of 2")
-
-    box_width = (PAGE_WIDTH - 132) / 3
-    draw_metric(canvas, 54, PAGE_HEIGHT - 230, box_width, "Monthly Inflow", fmt_money(sacs["monthly_inflow"]), BLUE_DARK)
-    draw_metric(canvas, 66 + box_width, PAGE_HEIGHT - 230, box_width, "Monthly Outflow", fmt_money(sacs["monthly_outflow"]), RED)
-    draw_metric(canvas, 78 + box_width * 2, PAGE_HEIGHT - 230, box_width, "Excess Transfer", fmt_money(sacs["excess_transfer"]), GREEN)
-
-    y = PAGE_HEIGHT - 285
-    draw_section_title(canvas, y, "Private Reserve")
-    y -= 44
-    target = max(float(sacs["private_reserve_target"]), 1)
-    fill = max(0, min(1, float(sacs["private_reserve_balance"]) / target))
-    canvas.setFillColor(SOFT_BLUE)
-    canvas.rect(54, y, PAGE_WIDTH - 108, 18, stroke=False, fill=True)
-    canvas.setFillColor(GREEN)
-    canvas.rect(54, y, (PAGE_WIDTH - 108) * fill, 18, stroke=False, fill=True)
-    set_font(canvas, 10, True, INK)
-    canvas.drawString(54, y - 20, f"{fmt_money(sacs['private_reserve_balance'])} of {fmt_money(sacs['private_reserve_target'])}")
-
-    y -= 62
-    rows = [
-        ["Six months expenses", fmt_money(sacs["monthly_outflow"] * 6)],
-        ["Deductibles", fmt_money(sacs["deductibles"])],
-        ["Reserve target", fmt_money(sacs["private_reserve_target"])],
-        ["Reserve gap", fmt_money(sacs["private_reserve_gap"])],
-    ]
-    draw_table(canvas, 54, y, ["Rule", "Value"], rows, [250, 170])
-    draw_note(
-        canvas,
-        54,
-        108,
-        "SACS values are generated from report run inputs. Excess equals inflow minus outflow. "
-        "Private reserve target equals six months of expenses plus deductibles.",
-    )
+    draw_sacs_page_one(canvas, client, run, sacs)
     canvas.showPage()
-
-    draw_header(canvas, client, "Reserve and Investment Context", run, "Page 2 of 2")
-    draw_metric(canvas, 54, PAGE_HEIGHT - 230, box_width, "Private Reserve", fmt_money(run.private_reserve_balance), BLUE_DARK)
-    draw_metric(canvas, 66 + box_width, PAGE_HEIGHT - 230, box_width, "Investment Balance", fmt_money(run.investment_account_balance), BLUE_DARK)
-    draw_metric(canvas, 78 + box_width * 2, PAGE_HEIGHT - 230, box_width, "Reserve Target", fmt_money(sacs["private_reserve_target"]), GREEN)
-    draw_section_title(canvas, PAGE_HEIGHT - 285, "Planning Notes")
-    draw_note(canvas, 54, PAGE_HEIGHT - 326, run.notes or "No notes entered.")
+    draw_sacs_page_two(canvas, client, run, sacs)
     canvas.save()
 
 

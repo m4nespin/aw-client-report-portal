@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  createClient,
   createReportRun,
   getClient,
   getClients,
@@ -51,6 +52,7 @@ type Filters = {
 
 type Route =
   | { name: "clients" }
+  | { name: "new-client" }
   | { name: "client"; clientId: string }
   | { name: "report"; clientId: string };
 
@@ -67,6 +69,7 @@ const initialFilters: Filters = {
 function parseRoute(pathname: string): Route {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] !== "clients") return { name: "clients" };
+  if (parts[1] === "new") return { name: "new-client" };
   if (parts[1] && parts[2] === "report") return { name: "report", clientId: parts[1] };
   if (parts[1]) return { name: "client", clientId: parts[1] };
   return { name: "clients" };
@@ -158,6 +161,24 @@ function clientToUpdatePayload(client: ClientDetail): ClientUpdatePayload {
   };
 }
 
+function newClientPayload(): ClientUpdatePayload {
+  return {
+    household_name: "",
+    status: "Active",
+    last_report_date: null,
+    primary_first_name: "",
+    primary_last_name: "",
+    primary_date_of_birth: null,
+    spouse_first_name: "",
+    spouse_last_name: "",
+    spouse_date_of_birth: null,
+    notes: "",
+    accounts: [],
+    liabilities: [],
+    trust_assets: []
+  };
+}
+
 function uniqueOptions(current: string, options: string[] | undefined) {
   return Array.from(new Set([current, ...(options ?? [])].filter(Boolean)));
 }
@@ -235,9 +256,8 @@ function ClientTable({
             <th>Household</th>
             <th>Primary</th>
             <th>Spouse</th>
-            <th>Status</th>
             <th>Assets</th>
-            <th>Ready</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -249,9 +269,8 @@ function ClientTable({
               </td>
               <td>{client.primary_contact}</td>
               <td>{client.spouse_contact || "Not set"}</td>
-              <td><StatusPill value={client.status} /></td>
               <td>{currency(client.total_assets)}</td>
-              <td><StatusPill value={client.readiness_status} /></td>
+              <td><StatusPill value={client.status} /></td>
             </tr>
           ))}
         </tbody>
@@ -368,7 +387,13 @@ function ClientsView({
           <p className="eyebrow">Client Operations</p>
           <h1>Households</h1>
         </div>
-        <span>{data?.total ?? 0} records</span>
+        <div className="header-actions">
+          <span className="record-count">{data?.total ?? 0} records</span>
+          <button className="primary-button" onClick={() => navigate("/clients/new")}>
+            <Plus size={17} />
+            Add Client
+          </button>
+        </div>
       </div>
       <FiltersBar filters={filters} setFilters={setFilters} meta={meta} />
       {error && <div className="error-banner">{error}</div>}
@@ -398,7 +423,9 @@ function ClientProfileForm({
   saving,
   error,
   onCancel,
-  onSubmit
+  onSubmit,
+  title = "Client Data",
+  submitLabel = "Save Client"
 }: {
   draft: ClientUpdatePayload;
   setDraft: (next: ClientUpdatePayload) => void;
@@ -407,6 +434,8 @@ function ClientProfileForm({
   error: string;
   onCancel: () => void;
   onSubmit: (event: FormEvent) => void;
+  title?: string;
+  submitLabel?: string;
 }) {
   const patch = (next: Partial<ClientUpdatePayload>) => setDraft({ ...draft, ...next });
   const statuses = uniqueOptions(draft.status, meta?.statuses);
@@ -464,7 +493,7 @@ function ClientProfileForm({
   return (
     <form className="panel client-profile-form" onSubmit={onSubmit}>
       <div className="panel-title-row">
-        <h2>Client Data</h2>
+        <h2>{title}</h2>
       </div>
       {error && <div className="error-banner">{error}</div>}
 
@@ -670,7 +699,7 @@ function ClientProfileForm({
         <button type="button" className="ghost-button" onClick={onCancel}>Cancel</button>
         <button type="submit" className="primary-button" disabled={saving}>
           {saving ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
-          Save Client
+          {submitLabel}
         </button>
       </div>
     </form>
@@ -921,6 +950,56 @@ function ClientDetailView({
   );
 }
 
+function NewClientView({
+  meta,
+  navigate,
+  refreshMeta
+}: {
+  meta: Meta | null;
+  navigate: (path: string) => void;
+  refreshMeta: () => void;
+}) {
+  const [draft, setDraft] = useState<ClientUpdatePayload>(() => newClientPayload());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const onSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    createClient(draft)
+      .then((client) => {
+        refreshMeta();
+        navigate(`/clients/${client.id}`);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <section className="view-shell detail">
+      <div className="detail-header">
+        <div>
+          <button className="back-link" onClick={() => navigate("/clients")}><ArrowLeft size={16} /> Clients</button>
+          <p className="eyebrow">New Household</p>
+          <h1>Add Client</h1>
+        </div>
+      </div>
+      <ClientProfileForm
+        draft={draft}
+        setDraft={setDraft}
+        meta={meta}
+        saving={saving}
+        error={error}
+        onCancel={() => navigate("/clients")}
+        onSubmit={onSubmit}
+        title="New Client Data"
+        submitLabel="Create Client"
+      />
+    </section>
+  );
+}
+
 function ReportView({ clientId, navigate }: { clientId: string; navigate: (path: string) => void }) {
   const { client, setClient, loading: clientLoading, error: clientError } = useClientDetail(clientId);
   const [prefill, setPrefill] = useState<ReportPrefill | null>(null);
@@ -1112,13 +1191,16 @@ export default function App() {
           <span>Client Report Portal</span>
         </button>
         <nav>
-          <button className={route.name === "clients" ? "active" : ""} onClick={() => navigate("/clients")}>Clients</button>
+          <button className={route.name === "clients" || route.name === "new-client" ? "active" : ""} onClick={() => navigate("/clients")}>Clients</button>
         </nav>
       </header>
 
       <section className="workspace single-view">
         {route.name === "clients" && (
           <ClientsView filters={filters} setFilters={setFilters} meta={meta} navigate={navigate} />
+        )}
+        {route.name === "new-client" && (
+          <NewClientView meta={meta} navigate={navigate} refreshMeta={refreshMeta} />
         )}
         {route.name === "client" && (
           <ClientDetailView clientId={route.clientId} meta={meta} navigate={navigate} refreshMeta={refreshMeta} />

@@ -2,7 +2,9 @@ from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
+from backend.database import SessionLocal
 from backend.main import app
+from backend.models import Client
 from backend.seed import UNIQUE_CLIENT_COUNT
 
 
@@ -120,6 +122,59 @@ def test_client_profile_can_be_updated() -> None:
     assert updated_liability["balance"] == 65432.1
     assert updated_trust_asset["name"] == "Updated Family Trust"
     assert updated_trust_asset["value"] == 765432.1
+
+
+def test_client_can_be_created() -> None:
+    created_id = None
+    payload = {
+        "household_name": "Integration Household",
+        "status": "Active",
+        "last_report_date": None,
+        "primary_first_name": "Integration",
+        "primary_last_name": "Primary",
+        "primary_date_of_birth": "1965-01-15",
+        "spouse_first_name": "Integration",
+        "spouse_last_name": "Spouse",
+        "spouse_date_of_birth": "1966-02-20",
+        "notes": "Created from API test.",
+        "accounts": [
+            {
+                "owner": "Primary",
+                "category": "retirement",
+                "name": "Integration IRA",
+                "institution": "Fidelity",
+                "account_type": "IRA",
+                "balance": 1000,
+                "as_of_date": "2026-06-01",
+            }
+        ],
+        "liabilities": [],
+        "trust_assets": [],
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/clients", json=payload)
+            assert response.status_code == 201
+            created = response.json()
+            created_id = created["id"]
+            detail = client.get(f"/api/clients/{created_id}").json()
+            search = client.get("/api/clients?search=Integration&page=1&page_size=5").json()
+
+        assert created["household_name"] == "Integration Household"
+        assert created["primary_contact"] == "Integration Primary"
+        assert created["spouse_contact"] == "Integration Spouse"
+        assert created["readiness_status"] == "Ready"
+        assert created["summary"]["grand_total"] == 1000
+        assert detail["accounts"][0]["name"] == "Integration IRA"
+        assert any(item["id"] == created_id for item in search["items"])
+    finally:
+        if created_id:
+            with SessionLocal() as db:
+                created_client = db.get(Client, created_id)
+                if created_client:
+                    db.delete(created_client)
+                    db.commit()
 
 
 def test_report_generation_creates_downloadable_metadata() -> None:

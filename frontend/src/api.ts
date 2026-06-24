@@ -35,6 +35,13 @@ export function getClient(id: string) {
   return apiFetch<ClientDetail>(`/clients/${id}`);
 }
 
+export function createClient(payload: ClientUpdatePayload) {
+  return apiFetch<ClientDetail>("/clients", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function updateClient(id: string, payload: ClientUpdatePayload) {
   return apiFetch<ClientDetail>(`/clients/${id}`, {
     method: "PUT",
