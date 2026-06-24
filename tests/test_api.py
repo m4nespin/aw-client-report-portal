@@ -1,10 +1,11 @@
 from copy import deepcopy
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from backend.database import SessionLocal
 from backend.main import app
-from backend.models import Client
+from backend.models import Client, GeneratedReport, ReportRun
 from backend.seed import UNIQUE_CLIENT_COUNT
 
 
@@ -201,3 +202,35 @@ def test_report_generation_creates_downloadable_metadata() -> None:
     assert created["calculation_snapshot"]["sacs"]["excess_transfer"] == 12_000
     assert {report["report_type"] for report in created["generated_reports"]} == {"SACS", "TCC"}
     assert all(report["size_bytes"] > 0 for report in created["generated_reports"])
+
+
+def test_missing_report_file_returns_404() -> None:
+    broken_report_id = None
+    try:
+        with SessionLocal() as db:
+            run = db.scalars(select(ReportRun).limit(1)).first()
+            assert run is not None
+            broken_report = GeneratedReport(
+                report_run_id=run.id,
+                client_id=run.client_id,
+                report_type="SACS",
+                filename="missing_seed_report.pdf",
+                file_path="",
+                size_bytes=0,
+            )
+            db.add(broken_report)
+            db.commit()
+            broken_report_id = broken_report.id
+
+        with TestClient(app) as client:
+            response = client.get(f"/api/generated-reports/{broken_report_id}/download")
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "report_file_missing"
+    finally:
+        if broken_report_id:
+            with SessionLocal() as db:
+                broken_report = db.get(GeneratedReport, broken_report_id)
+                if broken_report:
+                    db.delete(broken_report)
+                    db.commit()

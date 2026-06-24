@@ -4,7 +4,7 @@ import random
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Account, Client, GeneratedReport, HouseholdMember, Liability, ReportRun, TrustAsset
+from .models import Account, Client, HouseholdMember, Liability, ReportRun, TrustAsset
 
 FIRST_NAMES = [
     "Avery",
@@ -153,25 +153,5 @@ def seed_if_empty(db: Session, count: int = UNIQUE_CLIENT_COUNT) -> None:
             )
             db.add(run)
             db.flush()
-            db.add_all(
-                [
-                    GeneratedReport(
-                        report_run_id=run.id,
-                        client_id=client.id,
-                        report_type="SACS",
-                        filename=f"{client.household_name.replace(' ', '_')}_SACS_seed.pdf",
-                        file_path="",
-                        size_bytes=0,
-                    ),
-                    GeneratedReport(
-                        report_run_id=run.id,
-                        client_id=client.id,
-                        report_type="TCC",
-                        filename=f"{client.household_name.replace(' ', '_')}_TCC_seed.pdf",
-                        file_path="",
-                        size_bytes=0,
-                    ),
-                ]
-            )
 
     db.commit()

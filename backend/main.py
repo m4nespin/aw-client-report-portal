@@ -123,8 +123,16 @@ def run_out(run: ReportRun) -> ReportRunOut:
         calculation_snapshot=snapshot,
         notes=run.notes,
         created_at=run.created_at,
-        generated_reports=[GeneratedReportOut.model_validate(report) for report in run.generated_reports],
+        generated_reports=[GeneratedReportOut.model_validate(report) for report in run.generated_reports if report_file_path(report)],
     )
+
+
+def report_file_path(report: GeneratedReport) -> Path | None:
+    raw_path = report.file_path.strip()
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    return path if path.is_file() else None
 
 
 def detail_out(client: Client) -> ClientDetail:
@@ -474,8 +482,8 @@ def download_report(report_id: str, db: Session = Depends(get_db)) -> FileRespon
     report = db.get(GeneratedReport, report_id)
     if not report:
         raise HTTPException(status_code=404, detail={"code": "report_not_found", "message": "Report not found."})
-    path = Path(report.file_path)
-    if not path.exists():
+    path = report_file_path(report)
+    if not path:
         raise HTTPException(status_code=404, detail={"code": "report_file_missing", "message": "The report metadata exists, but the local file is missing."})
     return FileResponse(path, media_type="application/pdf", filename=report.filename)
 
