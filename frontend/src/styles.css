@@ -82,6 +82,14 @@ button:disabled {
   font-size: 18px;
 }
 
+.nav-button,
+.topbar nav button,
+.back-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
 .topbar nav {
   display: flex;
   gap: 28px;
@@ -89,7 +97,13 @@ button:disabled {
   font-size: 14px;
 }
 
-.topbar nav span:first-child {
+.topbar nav button,
+.topbar nav span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.topbar nav button.active {
   color: var(--blue);
   font-weight: 800;
 }
@@ -102,8 +116,21 @@ button:disabled {
   align-items: start;
 }
 
+.workspace.single-view {
+  display: block;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 22px;
+}
+
 .command-center,
 .detail {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+
+.view-shell {
   background: var(--panel);
   border: 1px solid var(--line);
   min-width: 0;
@@ -116,6 +143,12 @@ button:disabled {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.command-center.list-view {
+  position: static;
+  max-height: none;
+  min-height: calc(100vh - 102px);
 }
 
 .section-heading,
@@ -218,7 +251,8 @@ textarea {
 .icon-button,
 .primary-button,
 .ghost-button,
-.icon-link {
+.icon-link,
+.back-link {
   border-radius: 4px;
   min-height: 38px;
   display: inline-flex;
@@ -249,6 +283,13 @@ textarea {
   color: var(--blue-dark);
   padding: 0 13px;
   font-weight: 700;
+}
+
+.back-link {
+  color: var(--blue-dark);
+  font-weight: 800;
+  min-height: auto;
+  margin-bottom: 12px;
 }
 
 .table-wrap {
@@ -557,6 +598,15 @@ tbody tr.selected {
   gap: 16px;
 }
 
+.page-form {
+  padding: 22px;
+  overflow: visible;
+}
+
+.form-grid {
+  padding: 0;
+}
+
 fieldset {
   border: 1px solid var(--line);
   padding: 14px;
@@ -601,6 +651,14 @@ label {
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.page-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
@@ -665,6 +723,10 @@ label {
     padding: 10px;
   }
 
+  .workspace.single-view {
+    padding: 10px;
+  }
+
   .filters,
   .metrics-grid,
   .content-grid,
@@ -682,7 +744,8 @@ label {
 
   .panel,
   .metrics-grid,
-  .content-grid {
+  .content-grid,
+  .page-form {
     margin-left: 12px;
     margin-right: 12px;
     padding-left: 0;

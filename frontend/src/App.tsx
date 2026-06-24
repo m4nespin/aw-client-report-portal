@@ -1,5 +1,6 @@
 import {
   ArrowDownUp,
+  ArrowLeft,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -10,8 +11,7 @@ import {
   Search,
   SlidersHorizontal,
   UserRound,
-  WalletCards,
-  X
+  WalletCards
 } from "lucide-react";
 import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -44,6 +44,11 @@ type Filters = {
   page_size: number;
 };
 
+type Route =
+  | { name: "clients" }
+  | { name: "client"; clientId: string }
+  | { name: "report"; clientId: string };
+
 const initialFilters: Filters = {
   search: "",
   status: "",
@@ -55,6 +60,14 @@ const initialFilters: Filters = {
   page: 1,
   page_size: 25
 };
+
+function parseRoute(pathname: string): Route {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== "clients") return { name: "clients" };
+  if (parts[1] && parts[2] === "report") return { name: "report", clientId: parts[1] };
+  if (parts[1]) return { name: "client", clientId: parts[1] };
+  return { name: "clients" };
+}
 
 function currency(value: number | undefined) {
   return new Intl.NumberFormat("en-US", {
@@ -126,13 +139,34 @@ function useClientList(filters: Filters) {
   return { data, loading, error };
 }
 
+function useClientDetail(clientId: string) {
+  const [client, setClient] = useState<ClientDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = () => {
+    setLoading(true);
+    getClient(clientId)
+      .then((next) => {
+        setClient(next);
+        setError("");
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, [clientId]);
+
+  return { client, setClient, loading, error, refresh };
+}
+
 function ClientTable({
   clients,
-  selectedId,
   onSelect
 }: {
   clients: ClientListItem[];
-  selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -151,11 +185,7 @@ function ClientTable({
         </thead>
         <tbody>
           {clients.map((client) => (
-            <tr
-              key={client.id}
-              className={selectedId === client.id ? "selected" : ""}
-              onClick={() => onSelect(client.id)}
-            >
+            <tr key={client.id} onClick={() => onSelect(client.id)}>
               <td>
                 <b>{client.household_name}</b>
                 <span>{client.assigned_team_member}</span>
@@ -281,35 +311,87 @@ function AccountTable({
   );
 }
 
+function ClientsView({
+  filters,
+  setFilters,
+  meta,
+  navigate
+}: {
+  filters: Filters;
+  setFilters: (next: Filters) => void;
+  meta: Meta | null;
+  navigate: (path: string) => void;
+}) {
+  const { data, loading, error } = useClientList(filters);
+  const setPage = (page: number) => setFilters({ ...filters, page });
+
+  return (
+    <section className="view-shell command-center list-view">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Client Operations</p>
+          <h1>Households</h1>
+        </div>
+        <span>{data?.total ?? 0} records</span>
+      </div>
+      <FiltersBar filters={filters} setFilters={setFilters} meta={meta} />
+      {error && <div className="error-banner">{error}</div>}
+      {loading && <div className="loading-line"><Loader2 className="spin" size={17} /> Loading clients</div>}
+      {data && (
+        <>
+          <ClientTable clients={data.items} onSelect={(id) => navigate(`/clients/${id}`)} />
+          <div className="pager">
+            <button className="icon-button" title="Previous page" disabled={data.page <= 1} onClick={() => setPage(data.page - 1)}>
+              <ChevronLeft size={18} />
+            </button>
+            <span>Page {data.page} of {data.pages}</span>
+            <button className="icon-button" title="Next page" disabled={data.page >= data.pages} onClick={() => setPage(data.page + 1)}>
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function DetailView({
   client,
   loading,
+  onBack,
   onOpenReport,
   onRefresh
 }: {
   client: ClientDetail | null;
   loading: boolean;
+  onBack: () => void;
   onOpenReport: () => void;
   onRefresh: () => void;
 }) {
   if (loading) {
     return (
-      <section className="detail empty-state">
+      <section className="view-shell detail empty-state">
         <Loader2 className="spin" />
       </section>
     );
   }
   if (!client) {
-    return <section className="detail empty-state">No household selected.</section>;
+    return (
+      <section className="view-shell detail empty-state">
+        <button className="ghost-button" onClick={onBack}><ArrowLeft size={16} /> Clients</button>
+        <span>No household selected.</span>
+      </section>
+    );
   }
 
   const retirementOwners = Object.entries(client.summary.retirement_by_owner);
   const latestRun = client.report_runs[0];
 
   return (
-    <section className="detail">
+    <section className="view-shell detail">
       <div className="detail-header">
         <div>
+          <button className="back-link" onClick={onBack}><ArrowLeft size={16} /> Clients</button>
           <p className="eyebrow">{client.tier} / {client.assigned_team_member}</p>
           <h1>{client.household_name}</h1>
           <div className="inline-facts">
@@ -427,33 +509,41 @@ function DetailView({
   );
 }
 
-function ReportDrawer({
-  client,
-  open,
-  onClose,
-  onSaved
-}: {
-  client: ClientDetail | null;
-  open: boolean;
-  onClose: () => void;
-  onSaved: (client: ClientDetail) => void;
-}) {
+function ClientDetailView({ clientId, navigate }: { clientId: string; navigate: (path: string) => void }) {
+  const { client, loading, error, refresh } = useClientDetail(clientId);
+
+  return (
+    <>
+      {error && <div className="toast error-banner">{error}</div>}
+      <DetailView
+        client={client}
+        loading={loading}
+        onBack={() => navigate("/clients")}
+        onOpenReport={() => navigate(`/clients/${clientId}/report`)}
+        onRefresh={refresh}
+      />
+    </>
+  );
+}
+
+function ReportView({ clientId, navigate }: { clientId: string; navigate: (path: string) => void }) {
+  const { client, setClient, loading: clientLoading, error: clientError } = useClientDetail(clientId);
   const [prefill, setPrefill] = useState<ReportPrefill | null>(null);
   const [payload, setPayload] = useState<ReportPayload | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!open || !client) return;
     setError("");
     setPrefill(null);
-    getReportPrefill(client.id)
+    setPayload(null);
+    getReportPrefill(clientId)
       .then((next) => {
         setPrefill(next);
         setPayload({ ...next, notes: "" });
       })
       .catch((err: Error) => setError(err.message));
-  }, [open, client]);
+  }, [clientId]);
 
   const accountValues = useMemo(
     () => Object.fromEntries(payload?.account_updates.map((item) => [item.id, item.balance]) ?? []),
@@ -467,8 +557,6 @@ function ReportDrawer({
     () => Object.fromEntries(payload?.trust_asset_updates.map((item) => [item.id, item.value]) ?? []),
     [payload]
   );
-
-  if (!open || !client) return null;
 
   const patch = (next: Partial<ReportPayload>) => {
     if (!payload) return;
@@ -495,186 +583,149 @@ function ReportDrawer({
     if (!payload) return;
     setSaving(true);
     setError("");
-    createReportRun(client.id, payload)
+    createReportRun(clientId, payload)
       .then((result) => {
-        onSaved(result.client);
-        onClose();
+        setClient(result.client);
+        navigate(`/clients/${result.client.id}`);
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setSaving(false));
   };
 
+  if (clientLoading || !prefill || !payload) {
+    return (
+      <section className="view-shell report-view empty-state">
+        <Loader2 className="spin" />
+      </section>
+    );
+  }
+
+  if (!client) {
+    return (
+      <section className="view-shell report-view empty-state">
+        <button className="ghost-button" onClick={() => navigate("/clients")}><ArrowLeft size={16} /> Clients</button>
+        <span>{clientError || "Client not found."}</span>
+      </section>
+    );
+  }
+
   return (
-    <div className="drawer-shell">
-      <div className="drawer-backdrop" onClick={onClose} />
-      <aside className="drawer">
-        <div className="drawer-header">
-          <div>
-            <p className="eyebrow">{client.household_name}</p>
-            <h2>Report Run</h2>
+    <section className="view-shell report-view">
+      <div className="detail-header">
+        <div>
+          <button className="back-link" onClick={() => navigate(`/clients/${client.id}`)}><ArrowLeft size={16} /> Client Details</button>
+          <p className="eyebrow">{client.household_name}</p>
+          <h1>Report Run</h1>
+          <div className="inline-facts">
+            <span><CalendarDays size={15} /> {shortDate(payload.meeting_date)}</span>
+            <StatusPill value={client.readiness_status} />
           </div>
-          <button className="icon-button" title="Close report run" onClick={onClose}><X size={18} /></button>
         </div>
-        {!prefill || !payload ? (
-          <div className="drawer-loading"><Loader2 className="spin" /></div>
-        ) : (
-          <form onSubmit={onSubmit} className="report-form">
-            {error && <div className="error-banner">{error}</div>}
-            <fieldset>
-              <legend>Run Details</legend>
-              <div className="field-grid">
-                <label>Quarter<input value={payload.quarter} onChange={(event) => patch({ quarter: event.target.value })} /></label>
-                <label>Meeting Date<input type="date" value={payload.meeting_date ?? ""} onChange={(event) => patch({ meeting_date: event.target.value || null })} /></label>
-              </div>
-            </fieldset>
+      </div>
 
-            <fieldset>
-              <legend>SACS</legend>
-              <div className="field-grid">
-                <label>Monthly Inflow{numberInput(payload.monthly_inflow, (value) => patch({ monthly_inflow: value }))}</label>
-                <label>Monthly Outflow{numberInput(payload.monthly_outflow, (value) => patch({ monthly_outflow: value }))}</label>
-                <label>Deductibles{numberInput(payload.deductibles, (value) => patch({ deductibles: value }))}</label>
-                <label>Private Reserve{numberInput(payload.private_reserve_balance, (value) => patch({ private_reserve_balance: value }))}</label>
-                <label>Investment Balance{numberInput(payload.investment_account_balance, (value) => patch({ investment_account_balance: value }))}</label>
-              </div>
-            </fieldset>
+      <form onSubmit={onSubmit} className="report-form page-form">
+        {(error || clientError) && <div className="error-banner">{error || clientError}</div>}
+        <fieldset>
+          <legend>Run Details</legend>
+          <div className="field-grid">
+            <label>Quarter<input value={payload.quarter} onChange={(event) => patch({ quarter: event.target.value })} /></label>
+            <label>Meeting Date<input type="date" value={payload.meeting_date ?? ""} onChange={(event) => patch({ meeting_date: event.target.value || null })} /></label>
+          </div>
+        </fieldset>
 
-            <fieldset>
-              <legend>TCC Account Balances</legend>
-              <AccountTable accounts={client.accounts} mode="edit" values={accountValues} setValue={setAccountValue} />
-            </fieldset>
+        <fieldset>
+          <legend>SACS</legend>
+          <div className="field-grid">
+            <label>Monthly Inflow{numberInput(payload.monthly_inflow, (value) => patch({ monthly_inflow: value }))}</label>
+            <label>Monthly Outflow{numberInput(payload.monthly_outflow, (value) => patch({ monthly_outflow: value }))}</label>
+            <label>Deductibles{numberInput(payload.deductibles, (value) => patch({ deductibles: value }))}</label>
+            <label>Private Reserve{numberInput(payload.private_reserve_balance, (value) => patch({ private_reserve_balance: value }))}</label>
+            <label>Investment Balance{numberInput(payload.investment_account_balance, (value) => patch({ investment_account_balance: value }))}</label>
+          </div>
+        </fieldset>
 
-            <fieldset>
-              <legend>Liabilities</legend>
-              <div className="compact-list">
-                {client.liabilities.length === 0 && <span>None entered</span>}
-                {client.liabilities.map((item) => (
-                  <label key={item.id}>{item.name}{numberInput(liabilityValues[item.id] ?? item.balance, (value) => setLiabilityValue(item.id, value))}</label>
-                ))}
-              </div>
-            </fieldset>
+        <fieldset>
+          <legend>TCC Account Balances</legend>
+          <AccountTable accounts={client.accounts} mode="edit" values={accountValues} setValue={setAccountValue} />
+        </fieldset>
 
-            <fieldset>
-              <legend>Trust Assets</legend>
-              <div className="compact-list">
-                {client.trust_assets.length === 0 && <span>None entered</span>}
-                {client.trust_assets.map((item) => (
-                  <label key={item.id}>{item.name}{numberInput(trustValues[item.id] ?? item.value, (value) => setTrustValue(item.id, value))}</label>
-                ))}
-              </div>
-            </fieldset>
-
-            <label className="notes-field">Notes<textarea value={payload.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
-            <div className="drawer-actions">
-              <button type="button" className="ghost-button" onClick={onClose}>Cancel</button>
-              <button type="submit" className="primary-button" disabled={saving}>
-                {saving ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
-                Generate PDFs
-              </button>
+        <div className="content-grid form-grid">
+          <fieldset>
+            <legend>Liabilities</legend>
+            <div className="compact-list">
+              {client.liabilities.length === 0 && <span>None entered</span>}
+              {client.liabilities.map((item) => (
+                <label key={item.id}>{item.name}{numberInput(liabilityValues[item.id] ?? item.balance, (value) => setLiabilityValue(item.id, value))}</label>
+              ))}
             </div>
-          </form>
-        )}
-      </aside>
-    </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Trust Assets</legend>
+            <div className="compact-list">
+              {client.trust_assets.length === 0 && <span>None entered</span>}
+              {client.trust_assets.map((item) => (
+                <label key={item.id}>{item.name}{numberInput(trustValues[item.id] ?? item.value, (value) => setTrustValue(item.id, value))}</label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
+
+        <label className="notes-field">Notes<textarea value={payload.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
+        <div className="page-actions">
+          <button type="button" className="ghost-button" onClick={() => navigate(`/clients/${client.id}`)}>Cancel</button>
+          <button type="submit" className="primary-button" disabled={saving}>
+            {saving ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
+            Generate PDFs
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 
 export default function App() {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<ClientDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const { data, loading, error } = useClientList(filters);
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
+
+  const navigate = (path: string) => {
+    window.history.pushState({}, "", path);
+    setRoute(parseRoute(path));
+  };
+
+  useEffect(() => {
+    if (window.location.pathname === "/") navigate("/clients");
+    const onPopState = () => setRoute(parseRoute(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   useEffect(() => {
     getMeta().then(setMeta).catch(() => setMeta(null));
   }, []);
 
-  useEffect(() => {
-    if (!data?.items.length) return;
-    if (!selectedId || !data.items.some((client) => client.id === selectedId)) {
-      setSelectedId(data.items[0].id);
-    }
-  }, [data, selectedId]);
-
-  const refreshDetail = (id = selectedId) => {
-    if (!id) return;
-    setDetailLoading(true);
-    getClient(id)
-      .then((client) => {
-        setSelected(client);
-        setDetailError("");
-      })
-      .catch((err: Error) => setDetailError(err.message))
-      .finally(() => setDetailLoading(false));
-  };
-
-  useEffect(() => {
-    refreshDetail();
-  }, [selectedId]);
-
-  const setPage = (page: number) => setFilters({ ...filters, page });
-
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-mark"><WalletCards size={23} /><span>WealthPortal</span></div>
+        <button className="brand-mark nav-button" onClick={() => navigate("/clients")}>
+          <WalletCards size={23} />
+          <span>WealthPortal</span>
+        </button>
         <nav>
-          <span>Clients</span>
+          <button className={route.name === "clients" ? "active" : ""} onClick={() => navigate("/clients")}>Clients</button>
           <span>Report Runs</span>
           <span>PDF History</span>
         </nav>
       </header>
 
-      <section className="workspace">
-        <section className="command-center">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Client Operations</p>
-              <h1>Households</h1>
-            </div>
-            <span>{data?.total ?? 0} records</span>
-          </div>
-          <FiltersBar filters={filters} setFilters={setFilters} meta={meta} />
-          {error && <div className="error-banner">{error}</div>}
-          {loading && <div className="loading-line"><Loader2 className="spin" size={17} /> Loading clients</div>}
-          {data && (
-            <>
-              <ClientTable clients={data.items} selectedId={selectedId} onSelect={setSelectedId} />
-              <div className="pager">
-                <button className="icon-button" title="Previous page" disabled={data.page <= 1} onClick={() => setPage(data.page - 1)}>
-                  <ChevronLeft size={18} />
-                </button>
-                <span>Page {data.page} of {data.pages}</span>
-                <button className="icon-button" title="Next page" disabled={data.page >= data.pages} onClick={() => setPage(data.page + 1)}>
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-            </>
-          )}
-        </section>
-
-        <DetailView
-          client={selected}
-          loading={detailLoading}
-          onOpenReport={() => setDrawerOpen(true)}
-          onRefresh={() => refreshDetail()}
-        />
-        {detailError && <div className="toast error-banner">{detailError}</div>}
+      <section className="workspace single-view">
+        {route.name === "clients" && (
+          <ClientsView filters={filters} setFilters={setFilters} meta={meta} navigate={navigate} />
+        )}
+        {route.name === "client" && <ClientDetailView clientId={route.clientId} navigate={navigate} />}
+        {route.name === "report" && <ReportView clientId={route.clientId} navigate={navigate} />}
       </section>
-
-      <ReportDrawer
-        client={selected}
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        onSaved={(client) => {
-          setSelected(client);
-          setFilters({ ...filters });
-        }}
-      />
     </main>
   );
 }
