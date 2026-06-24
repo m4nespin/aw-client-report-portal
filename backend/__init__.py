@@ -1,1 +1,1 @@
-"""Backend package for the WealthPortal prototype."""
+"""Backend package for the Client Report Portal prototype."""

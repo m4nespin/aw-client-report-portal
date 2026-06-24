@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from .calculations import AccountValue, LiabilityValue, TrustValue, calculate_household_summary, calculate_sacs
 from .database import SessionLocal, create_db, get_db
-from .models import Account, Client, GeneratedReport, Liability, ReportRun, TrustAsset
+from .models import Account, Client, GeneratedReport, HouseholdMember, Liability, ReportRun, TrustAsset
 from .pdf import file_size, generate_sacs_pdf, generate_tcc_pdf, report_paths
 from .schemas import (
     ClientDetail,
     ClientListItem,
     ClientListResponse,
+    ClientUpdate,
     GeneratedReportOut,
     ReportRunCreate,
     ReportRunCreated,
@@ -34,10 +35,15 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="WealthPortal Client Report Portal", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Client Report Portal", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,10 +75,28 @@ def summary_for(client: Client) -> dict:
     )
 
 
+def member_name(member: HouseholdMember | None) -> str:
+    if not member:
+        return ""
+    return f"{member.first_name} {member.last_name}".strip()
+
+
+def primary_member(client: Client) -> HouseholdMember | None:
+    return next((member for member in client.members if member.relationship.lower() == "primary"), None)
+
+
+def spouse_member(client: Client) -> HouseholdMember | None:
+    return next((member for member in client.members if member.relationship.lower() == "spouse"), None)
+
+
+def visible_household_members(client: Client) -> list[HouseholdMember]:
+    return [member for member in (primary_member(client), spouse_member(client)) if member]
+
+
 def readiness_for(client: Client) -> str:
     if not client.accounts:
         return "Missing accounts"
-    if not client.members:
+    if not primary_member(client) or not spouse_member(client):
         return "Missing household"
     if client.status == "Waiting on Data":
         return "Waiting on data"
@@ -99,17 +123,17 @@ def run_out(run: ReportRun) -> ReportRunOut:
 
 
 def detail_out(client: Client) -> ClientDetail:
+    primary = primary_member(client)
+    spouse = spouse_member(client)
     return ClientDetail(
         id=client.id,
         household_name=client.household_name,
-        primary_contact=client.primary_contact,
+        primary_contact=member_name(primary) or client.primary_contact,
+        spouse_contact=member_name(spouse),
         status=client.status,
-        tier=client.tier,
-        assigned_team_member=client.assigned_team_member,
-        next_meeting_date=client.next_meeting_date,
         last_report_date=client.last_report_date,
         notes=client.notes,
-        members=client.members,
+        members=visible_household_members(client),
         accounts=client.accounts,
         liabilities=client.liabilities,
         trust_assets=client.trust_assets,
@@ -121,16 +145,16 @@ def detail_out(client: Client) -> ClientDetail:
 
 def list_item_out(client: Client) -> ClientListItem:
     summary = summary_for(client)
+    primary = primary_member(client)
+    spouse = spouse_member(client)
     return ClientListItem(
         id=client.id,
         household_name=client.household_name,
-        primary_contact=client.primary_contact,
+        primary_contact=member_name(primary) or client.primary_contact,
+        spouse_contact=member_name(spouse),
         status=client.status,
-        tier=client.tier,
-        assigned_team_member=client.assigned_team_member,
-        next_meeting_date=client.next_meeting_date,
         last_report_date=client.last_report_date,
-        member_count=len(client.members),
+        member_count=len(visible_household_members(client)),
         account_count=len(client.accounts),
         report_count=len(client.report_runs),
         total_assets=float(summary["grand_total"]),
@@ -150,10 +174,8 @@ def list_clients(
     db: Session = Depends(get_db),
     search: str = "",
     status: str = "",
-    tier: str = "",
-    assigned_team_member: str = "",
     missing_data: bool = False,
-    sort_by: str = Query("next_meeting_date", pattern="^(household_name|status|tier|next_meeting_date|last_report_date)$"),
+    sort_by: str = Query("household_name", pattern="^(household_name|status|last_report_date)$"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=5, le=100),
@@ -164,10 +186,6 @@ def list_clients(
         stmt = stmt.where(or_(func.lower(Client.household_name).like(needle), func.lower(Client.primary_contact).like(needle)))
     if status:
         stmt = stmt.where(Client.status == status)
-    if tier:
-        stmt = stmt.where(Client.tier == tier)
-    if assigned_team_member:
-        stmt = stmt.where(Client.assigned_team_member == assigned_team_member)
     if missing_data:
         stmt = stmt.where(or_(Client.last_report_date.is_(None), Client.status == "Waiting on Data"))
 
@@ -196,14 +214,114 @@ def list_clients(
 @app.get("/api/meta")
 def meta(db: Session = Depends(get_db)) -> dict[str, list[str]]:
     statuses = db.scalars(select(Client.status).distinct().order_by(Client.status)).all()
-    tiers = db.scalars(select(Client.tier).distinct().order_by(Client.tier)).all()
-    team = db.scalars(select(Client.assigned_team_member).distinct().order_by(Client.assigned_team_member)).all()
-    return {"statuses": statuses, "tiers": tiers, "team": team}
+    return {"statuses": statuses}
 
 
 @app.get("/api/clients/{client_id}", response_model=ClientDetail)
 def get_client(client_id: str, db: Session = Depends(get_db)) -> ClientDetail:
     return detail_out(load_client(db, client_id))
+
+
+def clean_required(value: str, field: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise HTTPException(status_code=422, detail={"code": "blank_field", "message": f"{field} cannot be blank."})
+    return cleaned
+
+
+def submitted_ids(items: list, label: str) -> set[str]:
+    ids = [item.id for item in items if item.id]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=422, detail={"code": "duplicate_id", "message": f"{label} contains duplicate rows."})
+    return set(ids)
+
+
+@app.put("/api/clients/{client_id}", response_model=ClientDetail)
+def update_client(client_id: str, payload: ClientUpdate, db: Session = Depends(get_db)) -> ClientDetail:
+    client = load_client(db, client_id)
+    client.household_name = clean_required(payload.household_name, "Household name")
+    client.status = clean_required(payload.status, "Status")
+    client.last_report_date = payload.last_report_date
+    client.notes = payload.notes.strip()
+
+    primary = primary_member(client)
+    if not primary:
+        primary = HouseholdMember(client_id=client.id, first_name="", last_name="", relationship="Primary")
+        db.add(primary)
+        client.members.append(primary)
+    primary.first_name = clean_required(payload.primary_first_name, "Primary first name")
+    primary.last_name = clean_required(payload.primary_last_name, "Primary last name")
+    primary.relationship = "Primary"
+    primary.date_of_birth = payload.primary_date_of_birth
+    client.primary_contact = member_name(primary)
+
+    spouse = spouse_member(client)
+    if not spouse:
+        spouse = HouseholdMember(client_id=client.id, first_name="", last_name="", relationship="Spouse")
+        db.add(spouse)
+        client.members.append(spouse)
+    spouse.first_name = clean_required(payload.spouse_first_name, "Spouse first name")
+    spouse.last_name = clean_required(payload.spouse_last_name, "Spouse last name")
+    spouse.relationship = "Spouse"
+    spouse.date_of_birth = payload.spouse_date_of_birth
+
+    keep_ids = {primary.id, spouse.id}
+    for member in list(client.members):
+        if member.id not in keep_ids:
+            db.delete(member)
+
+    account_by_id = {account.id: account for account in client.accounts}
+    account_ids = submitted_ids(payload.accounts, "Accounts")
+    if unknown := account_ids - set(account_by_id):
+        raise HTTPException(status_code=422, detail={"code": "unknown_account", "message": f"Unknown account row: {sorted(unknown)[0]}."})
+    for account in list(client.accounts):
+        if account.id not in account_ids:
+            db.delete(account)
+    for item in payload.accounts:
+        account = account_by_id[item.id] if item.id else Account(client_id=client.id)
+        if not item.id:
+            db.add(account)
+        account.owner = clean_required(item.owner, "Account owner")
+        account.category = clean_required(item.category, "Account category")
+        account.name = clean_required(item.name, "Account name")
+        account.institution = clean_required(item.institution, "Account institution")
+        account.account_type = clean_required(item.account_type, "Account type")
+        account.balance = item.balance
+        account.as_of_date = item.as_of_date
+
+    liability_by_id = {liability.id: liability for liability in client.liabilities}
+    liability_ids = submitted_ids(payload.liabilities, "Liabilities")
+    if unknown := liability_ids - set(liability_by_id):
+        raise HTTPException(status_code=422, detail={"code": "unknown_liability", "message": f"Unknown liability row: {sorted(unknown)[0]}."})
+    for liability in list(client.liabilities):
+        if liability.id not in liability_ids:
+            db.delete(liability)
+    for item in payload.liabilities:
+        liability = liability_by_id[item.id] if item.id else Liability(client_id=client.id)
+        if not item.id:
+            db.add(liability)
+        liability.name = clean_required(item.name, "Liability name")
+        liability.liability_type = clean_required(item.liability_type, "Liability type")
+        liability.balance = item.balance
+        liability.as_of_date = item.as_of_date
+
+    trust_by_id = {asset.id: asset for asset in client.trust_assets}
+    trust_ids = submitted_ids(payload.trust_assets, "Trust assets")
+    if unknown := trust_ids - set(trust_by_id):
+        raise HTTPException(status_code=422, detail={"code": "unknown_trust_asset", "message": f"Unknown trust asset row: {sorted(unknown)[0]}."})
+    for asset in list(client.trust_assets):
+        if asset.id not in trust_ids:
+            db.delete(asset)
+    for item in payload.trust_assets:
+        asset = trust_by_id[item.id] if item.id else TrustAsset(client_id=client.id)
+        if not item.id:
+            db.add(asset)
+        asset.name = clean_required(item.name, "Trust asset name")
+        asset.value = item.value
+        asset.as_of_date = item.as_of_date
+
+    db.commit()
+    return detail_out(load_client(db, client.id))
 
 
 @app.get("/api/clients/{client_id}/report-prefill")
@@ -212,7 +330,7 @@ def report_prefill(client_id: str, db: Session = Depends(get_db)) -> dict:
     latest = client.report_runs[0] if client.report_runs else None
     return {
         "quarter": f"{date.today().year} Q{((date.today().month - 1) // 3) + 1}",
-        "meeting_date": client.next_meeting_date,
+        "meeting_date": latest.meeting_date if latest else date.today(),
         "monthly_inflow": latest.monthly_inflow if latest else 25000,
         "monthly_outflow": latest.monthly_outflow if latest else 16000,
         "deductibles": latest.deductibles if latest else 4500,

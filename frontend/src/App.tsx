@@ -8,8 +8,10 @@ import {
   Download,
   FileText,
   Loader2,
+  Pencil,
+  Plus,
   Search,
-  SlidersHorizontal,
+  Trash2,
   UserRound,
   WalletCards
 } from "lucide-react";
@@ -20,23 +22,26 @@ import {
   getClients,
   getMeta,
   getReportPrefill,
-  reportDownloadUrl
+  reportDownloadUrl,
+  updateClient
 } from "./api";
 import type {
   Account,
+  AccountUpdatePayload,
   ClientDetail,
   ClientListItem,
   ClientListResponse,
+  ClientUpdatePayload,
+  LiabilityUpdatePayload,
   Meta,
   ReportPayload,
-  ReportPrefill
+  ReportPrefill,
+  TrustAssetUpdatePayload
 } from "./types";
 
 type Filters = {
   search: string;
   status: string;
-  tier: string;
-  assigned_team_member: string;
   missing_data: boolean;
   sort_by: string;
   sort_dir: string;
@@ -52,10 +57,8 @@ type Route =
 const initialFilters: Filters = {
   search: "",
   status: "",
-  tier: "",
-  assigned_team_member: "",
   missing_data: false,
-  sort_by: "next_meeting_date",
+  sort_by: "household_name",
   sort_dir: "asc",
   page: 1,
   page_size: 25
@@ -95,13 +98,68 @@ function numberInput(value: number, onChange: (next: number) => void) {
 }
 
 function statusTone(status: string) {
-  if (status === "Ready" || status === "Draft Ready" || status === "Active") return "good";
-  if (status.includes("Waiting") || status.includes("Missing")) return "warn";
+  const normalized = status.toLowerCase();
+  if (["ready", "draft ready", "active"].includes(normalized)) return "good";
+  if (
+    normalized.includes("waiting") ||
+    normalized.includes("missing") ||
+    normalized.includes("review") ||
+    normalized.includes("due")
+  ) return "warn";
   return "neutral";
 }
 
 function StatusPill({ value }: { value: string }) {
   return <span className={`status ${statusTone(value)}`}>{value}</span>;
+}
+
+function householdMember(client: ClientDetail, relationships: string[]) {
+  const normalized = relationships.map((item) => item.toLowerCase());
+  return client.members.find((member) => normalized.includes(member.relationship.toLowerCase()));
+}
+
+function clientToUpdatePayload(client: ClientDetail): ClientUpdatePayload {
+  const primary = householdMember(client, ["Primary"]);
+  const spouse = householdMember(client, ["Spouse"]);
+  return {
+    household_name: client.household_name,
+    status: client.status,
+    last_report_date: client.last_report_date,
+    primary_first_name: primary?.first_name ?? "",
+    primary_last_name: primary?.last_name ?? "",
+    primary_date_of_birth: primary?.date_of_birth ?? null,
+    spouse_first_name: spouse?.first_name ?? "",
+    spouse_last_name: spouse?.last_name ?? "",
+    spouse_date_of_birth: spouse?.date_of_birth ?? null,
+    notes: client.notes,
+    accounts: client.accounts.map((account) => ({
+      id: account.id,
+      owner: account.owner,
+      category: account.category,
+      name: account.name,
+      institution: account.institution,
+      account_type: account.account_type,
+      balance: account.balance,
+      as_of_date: account.as_of_date
+    })),
+    liabilities: client.liabilities.map((item) => ({
+      id: item.id,
+      name: item.name,
+      liability_type: item.liability_type,
+      balance: item.balance,
+      as_of_date: item.as_of_date
+    })),
+    trust_assets: client.trust_assets.map((item) => ({
+      id: item.id,
+      name: item.name,
+      value: item.value,
+      as_of_date: item.as_of_date
+    }))
+  };
+}
+
+function uniqueOptions(current: string, options: string[] | undefined) {
+  return Array.from(new Set([current, ...(options ?? [])].filter(Boolean)));
 }
 
 function Metric({ label, value, accent }: { label: string; value: string; accent?: string }) {
@@ -175,10 +233,9 @@ function ClientTable({
         <thead>
           <tr>
             <th>Household</th>
-            <th>Owner</th>
+            <th>Primary</th>
+            <th>Spouse</th>
             <th>Status</th>
-            <th>Tier</th>
-            <th>Next Meeting</th>
             <th>Assets</th>
             <th>Ready</th>
           </tr>
@@ -188,12 +245,11 @@ function ClientTable({
             <tr key={client.id} onClick={() => onSelect(client.id)}>
               <td>
                 <b>{client.household_name}</b>
-                <span>{client.assigned_team_member}</span>
+                <span>{client.member_count} household members</span>
               </td>
               <td>{client.primary_contact}</td>
+              <td>{client.spouse_contact || "Not set"}</td>
               <td><StatusPill value={client.status} /></td>
-              <td>{client.tier}</td>
-              <td>{shortDate(client.next_meeting_date)}</td>
               <td>{currency(client.total_assets)}</td>
               <td><StatusPill value={client.readiness_status} /></td>
             </tr>
@@ -228,17 +284,6 @@ function FiltersBar({
         <option value="">All statuses</option>
         {meta?.statuses.map((item) => <option key={item}>{item}</option>)}
       </select>
-      <select value={filters.tier} onChange={(event) => patch({ tier: event.target.value })}>
-        <option value="">All tiers</option>
-        {meta?.tiers.map((item) => <option key={item}>{item}</option>)}
-      </select>
-      <select
-        value={filters.assigned_team_member}
-        onChange={(event) => patch({ assigned_team_member: event.target.value })}
-      >
-        <option value="">All advisors</option>
-        {meta?.team.map((item) => <option key={item}>{item}</option>)}
-      </select>
       <label className="check-row">
         <input
           type="checkbox"
@@ -250,20 +295,11 @@ function FiltersBar({
       <label className="select-with-icon">
         <ArrowDownUp size={15} />
         <select value={filters.sort_by} onChange={(event) => patch({ sort_by: event.target.value })}>
-          <option value="next_meeting_date">Next meeting</option>
           <option value="last_report_date">Last report</option>
           <option value="household_name">Household</option>
           <option value="status">Status</option>
-          <option value="tier">Tier</option>
         </select>
       </label>
-      <button
-        className="icon-button"
-        title="Toggle sort direction"
-        onClick={() => patch({ sort_dir: filters.sort_dir === "asc" ? "desc" : "asc" })}
-      >
-        <SlidersHorizontal size={17} />
-      </button>
     </section>
   );
 }
@@ -355,19 +391,320 @@ function ClientsView({
   );
 }
 
+function ClientProfileForm({
+  draft,
+  setDraft,
+  meta,
+  saving,
+  error,
+  onCancel,
+  onSubmit
+}: {
+  draft: ClientUpdatePayload;
+  setDraft: (next: ClientUpdatePayload) => void;
+  meta: Meta | null;
+  saving: boolean;
+  error: string;
+  onCancel: () => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  const patch = (next: Partial<ClientUpdatePayload>) => setDraft({ ...draft, ...next });
+  const statuses = uniqueOptions(draft.status, meta?.statuses);
+  const setAccount = (index: number, next: Partial<AccountUpdatePayload>) => {
+    patch({ accounts: draft.accounts.map((item, idx) => idx === index ? { ...item, ...next } : item) });
+  };
+  const setLiability = (index: number, next: Partial<LiabilityUpdatePayload>) => {
+    patch({ liabilities: draft.liabilities.map((item, idx) => idx === index ? { ...item, ...next } : item) });
+  };
+  const setTrustAsset = (index: number, next: Partial<TrustAssetUpdatePayload>) => {
+    patch({ trust_assets: draft.trust_assets.map((item, idx) => idx === index ? { ...item, ...next } : item) });
+  };
+  const addAccount = () => {
+    patch({
+      accounts: [
+        ...draft.accounts,
+        {
+          owner: "Primary",
+          category: "non_retirement",
+          name: "",
+          institution: "",
+          account_type: "",
+          balance: 0,
+          as_of_date: null
+        }
+      ]
+    });
+  };
+  const addLiability = () => {
+    patch({
+      liabilities: [
+        ...draft.liabilities,
+        {
+          name: "",
+          liability_type: "",
+          balance: 0,
+          as_of_date: null
+        }
+      ]
+    });
+  };
+  const addTrustAsset = () => {
+    patch({
+      trust_assets: [
+        ...draft.trust_assets,
+        {
+          name: "",
+          value: 0,
+          as_of_date: null
+        }
+      ]
+    });
+  };
+
+  return (
+    <form className="panel client-profile-form" onSubmit={onSubmit}>
+      <div className="panel-title-row">
+        <h2>Client Data</h2>
+      </div>
+      {error && <div className="error-banner">{error}</div>}
+
+      <fieldset>
+        <legend>Household</legend>
+        <div className="field-grid">
+          <label>
+            Household Name
+            <input
+              required
+              maxLength={160}
+              value={draft.household_name}
+              onChange={(event) => patch({ household_name: event.target.value })}
+            />
+          </label>
+          <label>
+            Status
+            <input
+              required
+              list="client-status-options"
+              maxLength={40}
+              value={draft.status}
+              onChange={(event) => patch({ status: event.target.value })}
+            />
+            <datalist id="client-status-options">
+              {statuses.map((item) => <option key={item} value={item} />)}
+            </datalist>
+          </label>
+          <label>
+            Last Report Date
+            <input
+              type="date"
+              value={draft.last_report_date ?? ""}
+              onChange={(event) => patch({ last_report_date: event.target.value || null })}
+            />
+          </label>
+          <label>
+            Primary First Name
+            <input
+              required
+              maxLength={80}
+              value={draft.primary_first_name}
+              onChange={(event) => patch({ primary_first_name: event.target.value })}
+            />
+          </label>
+          <label>
+            Primary Last Name
+            <input
+              required
+              maxLength={80}
+              value={draft.primary_last_name}
+              onChange={(event) => patch({ primary_last_name: event.target.value })}
+            />
+          </label>
+          <label>
+            Primary Date of Birth
+            <input
+              type="date"
+              value={draft.primary_date_of_birth ?? ""}
+              onChange={(event) => patch({ primary_date_of_birth: event.target.value || null })}
+            />
+          </label>
+          <label>
+            Spouse First Name
+            <input
+              required
+              maxLength={80}
+              value={draft.spouse_first_name}
+              onChange={(event) => patch({ spouse_first_name: event.target.value })}
+            />
+          </label>
+          <label>
+            Spouse Last Name
+            <input
+              required
+              maxLength={80}
+              value={draft.spouse_last_name}
+              onChange={(event) => patch({ spouse_last_name: event.target.value })}
+            />
+          </label>
+          <label>
+            Spouse Date of Birth
+            <input
+              type="date"
+              value={draft.spouse_date_of_birth ?? ""}
+              onChange={(event) => patch({ spouse_date_of_birth: event.target.value || null })}
+            />
+          </label>
+        </div>
+        <label className="notes-field">
+          Notes
+          <textarea maxLength={5000} value={draft.notes} onChange={(event) => patch({ notes: event.target.value })} />
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Accounts</legend>
+        <div className="fieldset-title-row">
+          <span>{draft.accounts.length} rows</span>
+          <button type="button" className="ghost-button" onClick={addAccount}><Plus size={16} /> Add Account</button>
+        </div>
+        <div className="table-wrap edit-table-wrap">
+          <table className="edit-table">
+            <thead><tr><th>Owner</th><th>Category</th><th>Name</th><th>Institution</th><th>Type</th><th>Balance</th><th>As Of</th><th></th></tr></thead>
+            <tbody>
+              {draft.accounts.map((account, index) => (
+                <tr key={account.id ?? `new-account-${index}`}>
+                  <td><input required aria-label="Account owner" value={account.owner} onChange={(event) => setAccount(index, { owner: event.target.value })} /></td>
+                  <td><input required aria-label="Account category" value={account.category} onChange={(event) => setAccount(index, { category: event.target.value })} /></td>
+                  <td><input required aria-label="Account name" value={account.name} onChange={(event) => setAccount(index, { name: event.target.value })} /></td>
+                  <td><input required aria-label="Account institution" value={account.institution} onChange={(event) => setAccount(index, { institution: event.target.value })} /></td>
+                  <td><input required aria-label="Account type" value={account.account_type} onChange={(event) => setAccount(index, { account_type: event.target.value })} /></td>
+                  <td><input type="number" min="0" step="0.01" value={account.balance} onChange={(event) => setAccount(index, { balance: Number(event.target.value) })} /></td>
+                  <td><input type="date" value={account.as_of_date ?? ""} onChange={(event) => setAccount(index, { as_of_date: event.target.value || null })} /></td>
+                  <td>
+                    <button
+                      type="button"
+                      className="icon-button danger-button"
+                      title="Remove account"
+                      onClick={() => patch({ accounts: draft.accounts.filter((_, idx) => idx !== index) })}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {draft.accounts.length === 0 && <tr><td colSpan={8}>No accounts entered</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </fieldset>
+
+      <div className="content-grid form-grid">
+        <fieldset>
+          <legend>Liabilities</legend>
+          <div className="fieldset-title-row">
+            <span>{draft.liabilities.length} rows</span>
+            <button type="button" className="ghost-button" onClick={addLiability}><Plus size={16} /> Add Liability</button>
+          </div>
+          <div className="table-wrap edit-table-wrap">
+            <table className="edit-table">
+              <thead><tr><th>Name</th><th>Type</th><th>Balance</th><th>As Of</th><th></th></tr></thead>
+              <tbody>
+                {draft.liabilities.map((item, index) => (
+                  <tr key={item.id ?? `new-liability-${index}`}>
+                    <td><input required value={item.name} onChange={(event) => setLiability(index, { name: event.target.value })} /></td>
+                    <td><input required value={item.liability_type} onChange={(event) => setLiability(index, { liability_type: event.target.value })} /></td>
+                    <td><input type="number" min="0" step="0.01" value={item.balance} onChange={(event) => setLiability(index, { balance: Number(event.target.value) })} /></td>
+                    <td><input type="date" value={item.as_of_date ?? ""} onChange={(event) => setLiability(index, { as_of_date: event.target.value || null })} /></td>
+                    <td>
+                      <button
+                        type="button"
+                        className="icon-button danger-button"
+                        title="Remove liability"
+                        onClick={() => patch({ liabilities: draft.liabilities.filter((_, idx) => idx !== index) })}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {draft.liabilities.length === 0 && <tr><td colSpan={5}>No liabilities entered</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Trust Assets</legend>
+          <div className="fieldset-title-row">
+            <span>{draft.trust_assets.length} rows</span>
+            <button type="button" className="ghost-button" onClick={addTrustAsset}><Plus size={16} /> Add Trust Asset</button>
+          </div>
+          <div className="table-wrap edit-table-wrap">
+            <table className="edit-table">
+              <thead><tr><th>Name</th><th>Value</th><th>As Of</th><th></th></tr></thead>
+              <tbody>
+                {draft.trust_assets.map((item, index) => (
+                  <tr key={item.id ?? `new-trust-${index}`}>
+                    <td><input required value={item.name} onChange={(event) => setTrustAsset(index, { name: event.target.value })} /></td>
+                    <td><input type="number" min="0" step="0.01" value={item.value} onChange={(event) => setTrustAsset(index, { value: Number(event.target.value) })} /></td>
+                    <td><input type="date" value={item.as_of_date ?? ""} onChange={(event) => setTrustAsset(index, { as_of_date: event.target.value || null })} /></td>
+                    <td>
+                      <button
+                        type="button"
+                        className="icon-button danger-button"
+                        title="Remove trust asset"
+                        onClick={() => patch({ trust_assets: draft.trust_assets.filter((_, idx) => idx !== index) })}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {draft.trust_assets.length === 0 && <tr><td colSpan={4}>No trust assets entered</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+      </div>
+
+      <div className="page-actions">
+        <button type="button" className="ghost-button" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="primary-button" disabled={saving}>
+          {saving ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
+          Save Client
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function DetailView({
   client,
   loading,
+  meta,
   onBack,
+  onSaveClient,
   onOpenReport,
   onRefresh
 }: {
   client: ClientDetail | null;
   loading: boolean;
+  meta: Meta | null;
   onBack: () => void;
+  onSaveClient: (payload: ClientUpdatePayload) => Promise<void>;
   onOpenReport: () => void;
   onRefresh: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ClientUpdatePayload | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft(null);
+    setFormError("");
+  }, [client?.id]);
+
   if (loading) {
     return (
       <section className="view-shell detail empty-state">
@@ -386,25 +723,66 @@ function DetailView({
 
   const retirementOwners = Object.entries(client.summary.retirement_by_owner);
   const latestRun = client.report_runs[0];
+  const primary = householdMember(client, ["Primary"]);
+  const spouse = householdMember(client, ["Spouse"]);
+  const startEditing = () => {
+    setDraft(clientToUpdatePayload(client));
+    setEditing(true);
+    setFormError("");
+  };
+  const cancelEditing = () => {
+    setDraft(null);
+    setEditing(false);
+    setFormError("");
+  };
+  const saveEditing = (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft) return;
+    setSaving(true);
+    setFormError("");
+    onSaveClient(draft)
+      .then(() => cancelEditing())
+      .catch((err: Error) => setFormError(err.message))
+      .finally(() => setSaving(false));
+  };
 
   return (
     <section className="view-shell detail">
       <div className="detail-header">
         <div>
           <button className="back-link" onClick={onBack}><ArrowLeft size={16} /> Clients</button>
-          <p className="eyebrow">{client.tier} / {client.assigned_team_member}</p>
+          <p className="eyebrow">{client.status}</p>
           <h1>{client.household_name}</h1>
           <div className="inline-facts">
-            <span><UserRound size={15} /> {client.primary_contact}</span>
-            <span><CalendarDays size={15} /> {shortDate(client.next_meeting_date)}</span>
+            <span><UserRound size={15} /> Primary: {primary ? `${primary.first_name} ${primary.last_name}` : client.primary_contact}</span>
+            <span><UserRound size={15} /> Spouse: {spouse ? `${spouse.first_name} ${spouse.last_name}` : "Not set"}</span>
             <StatusPill value={client.readiness_status} />
           </div>
+          {client.notes && <p className="profile-notes">{client.notes}</p>}
         </div>
-        <button className="primary-button" onClick={onOpenReport}>
-          <FileText size={18} />
-          Start Report
-        </button>
+        <div className="header-actions">
+          <button className="ghost-button" onClick={startEditing}>
+            <Pencil size={17} />
+            Edit Client
+          </button>
+          <button className="primary-button" onClick={onOpenReport}>
+            <FileText size={18} />
+            Start Report
+          </button>
+        </div>
       </div>
+
+      {editing && draft && (
+        <ClientProfileForm
+          draft={draft}
+          setDraft={setDraft}
+          meta={meta}
+          saving={saving}
+          error={formError}
+          onCancel={cancelEditing}
+          onSubmit={saveEditing}
+        />
+      )}
 
       <div className="metrics-grid">
         <Metric label="Grand Total" value={currency(client.summary.grand_total)} />
@@ -415,13 +793,12 @@ function DetailView({
 
       <div className="content-grid">
         <section className="panel">
-          <h2>Household Members</h2>
+          <h2>Household</h2>
           <div className="member-grid">
             {client.members.map((member) => (
               <div className="member" key={member.id}>
                 <b>{member.first_name} {member.last_name}</b>
-                <span>{member.relationship}</span>
-                <span>{shortDate(member.date_of_birth)}</span>
+                <span>{member.relationship === "Primary" ? "Primary" : "Spouse"}</span>
               </div>
             ))}
           </div>
@@ -509,8 +886,24 @@ function DetailView({
   );
 }
 
-function ClientDetailView({ clientId, navigate }: { clientId: string; navigate: (path: string) => void }) {
-  const { client, loading, error, refresh } = useClientDetail(clientId);
+function ClientDetailView({
+  clientId,
+  meta,
+  navigate,
+  refreshMeta
+}: {
+  clientId: string;
+  meta: Meta | null;
+  navigate: (path: string) => void;
+  refreshMeta: () => void;
+}) {
+  const { client, setClient, loading, error, refresh } = useClientDetail(clientId);
+
+  const saveClient = (payload: ClientUpdatePayload) =>
+    updateClient(clientId, payload).then((updated) => {
+      setClient(updated);
+      refreshMeta();
+    });
 
   return (
     <>
@@ -518,7 +911,9 @@ function ClientDetailView({ clientId, navigate }: { clientId: string; navigate: 
       <DetailView
         client={client}
         loading={loading}
+        meta={meta}
         onBack={() => navigate("/clients")}
+        onSaveClient={saveClient}
         onOpenReport={() => navigate(`/clients/${clientId}/report`)}
         onRefresh={refresh}
       />
@@ -694,6 +1089,10 @@ export default function App() {
     setRoute(parseRoute(path));
   };
 
+  const refreshMeta = () => {
+    getMeta().then(setMeta).catch(() => setMeta(null));
+  };
+
   useEffect(() => {
     if (window.location.pathname === "/") navigate("/clients");
     const onPopState = () => setRoute(parseRoute(window.location.pathname));
@@ -702,7 +1101,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    getMeta().then(setMeta).catch(() => setMeta(null));
+    refreshMeta();
   }, []);
 
   return (
@@ -710,12 +1109,10 @@ export default function App() {
       <header className="topbar">
         <button className="brand-mark nav-button" onClick={() => navigate("/clients")}>
           <WalletCards size={23} />
-          <span>WealthPortal</span>
+          <span>Client Report Portal</span>
         </button>
         <nav>
           <button className={route.name === "clients" ? "active" : ""} onClick={() => navigate("/clients")}>Clients</button>
-          <span>Report Runs</span>
-          <span>PDF History</span>
         </nav>
       </header>
 
@@ -723,7 +1120,9 @@ export default function App() {
         {route.name === "clients" && (
           <ClientsView filters={filters} setFilters={setFilters} meta={meta} navigate={navigate} />
         )}
-        {route.name === "client" && <ClientDetailView clientId={route.clientId} navigate={navigate} />}
+        {route.name === "client" && (
+          <ClientDetailView clientId={route.clientId} meta={meta} navigate={navigate} refreshMeta={refreshMeta} />
+        )}
         {route.name === "report" && <ReportView clientId={route.clientId} navigate={navigate} />}
       </section>
     </main>

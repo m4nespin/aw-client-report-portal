@@ -42,20 +42,19 @@ LAST_NAMES = [
     "Ortiz",
     "Patel",
 ]
-TEAM = ["M. Walker", "J. Rivera", "S. Chen", "A. Patel"]
-TIERS = ["Premier", "Core", "Emerging"]
 STATUSES = ["Active", "Review Due", "Waiting on Data", "Draft Ready"]
 INSTITUTIONS = ["Pinnacle Bank", "Schwab", "Fidelity", "Vanguard", "Northern Trust"]
+UNIQUE_CLIENT_COUNT = min(len(FIRST_NAMES), len(LAST_NAMES))
 
 
-def seed_if_empty(db: Session, count: int = 180) -> None:
+def seed_if_empty(db: Session, count: int = UNIQUE_CLIENT_COUNT) -> None:
     existing = db.scalar(select(Client.id).limit(1))
     if existing:
         return
 
     rng = random.Random(42)
     today = date.today()
-    for idx in range(count):
+    for idx in range(min(count, UNIQUE_CLIENT_COUNT)):
         last_name = LAST_NAMES[idx % len(LAST_NAMES)]
         primary = FIRST_NAMES[idx % len(FIRST_NAMES)]
         secondary = FIRST_NAMES[(idx + 5) % len(FIRST_NAMES)]
@@ -63,9 +62,6 @@ def seed_if_empty(db: Session, count: int = 180) -> None:
             household_name=f"{last_name} Household",
             primary_contact=f"{primary} {last_name}",
             status=STATUSES[idx % len(STATUSES)],
-            tier=TIERS[idx % len(TIERS)],
-            assigned_team_member=TEAM[idx % len(TEAM)],
-            next_meeting_date=today + timedelta(days=(idx % 90) + 3),
             last_report_date=today - timedelta(days=(idx % 120) + 18) if idx % 4 != 0 else None,
             notes="Quarterly review cadence with manually entered balances.",
         )
@@ -90,16 +86,6 @@ def seed_if_empty(db: Session, count: int = 180) -> None:
                 ),
             ]
         )
-        if idx % 5 == 0:
-            db.add(
-                HouseholdMember(
-                    client_id=client.id,
-                    first_name=FIRST_NAMES[(idx + 9) % len(FIRST_NAMES)],
-                    last_name=last_name,
-                    relationship="Dependent",
-                    date_of_birth=date(2001 + (idx % 12), ((idx + 8) % 12) + 1, ((idx + 2) % 26) + 1),
-                )
-            )
 
         retirement_count = 2 + idx % 4
         non_retirement_count = 2 + idx % 5

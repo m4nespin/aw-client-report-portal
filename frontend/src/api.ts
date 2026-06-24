@@ -1,4 +1,4 @@
-import type { ClientDetail, ClientListResponse, Meta, ReportPayload, ReportPrefill } from "./types";
+import type { ClientDetail, ClientListResponse, ClientUpdatePayload, Meta, ReportPayload, ReportPrefill } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
@@ -33,6 +33,13 @@ export function getClients(params: URLSearchParams) {
 
 export function getClient(id: string) {
   return apiFetch<ClientDetail>(`/clients/${id}`);
+}
+
+export function updateClient(id: string, payload: ClientUpdatePayload) {
+  return apiFetch<ClientDetail>(`/clients/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function getReportPrefill(id: string) {

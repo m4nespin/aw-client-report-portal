@@ -1,18 +1,18 @@
 :root {
-  --blue: #005a97;
-  --blue-dark: #003f6f;
-  --ink: #102238;
-  --muted: #62748a;
-  --line: #d8e0e8;
-  --page: #f3f6f8;
+  --blue: #186fc9;
+  --blue-dark: #0c4f91;
+  --ink: #0f2f52;
+  --muted: #5d7898;
+  --line: #cfe1f6;
+  --page: #f2f8ff;
   --panel: #ffffff;
-  --soft-blue: #e8f2fb;
+  --soft-blue: #e7f2fe;
   --green: #247a3b;
   --green-bg: #eaf5ed;
   --amber: #9d6500;
   --amber-bg: #fff4d8;
   --red: #c0341d;
-  --shadow: 0 12px 36px rgba(16, 34, 56, 0.08);
+  --shadow: 0 12px 36px rgba(24, 111, 201, 0.1);
 }
 
 * {
@@ -68,6 +68,7 @@ button:disabled {
 .brand-mark,
 .inline-facts,
 .download-group,
+.header-actions,
 .panel-title-row,
 .pager,
 .loading-line {
@@ -185,7 +186,7 @@ button:disabled {
 
 .filters {
   display: grid;
-  grid-template-columns: 1.4fr repeat(3, minmax(114px, 0.75fr)) auto auto auto;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(140px, 0.75fr) auto minmax(150px, 0.75fr) auto;
   gap: 10px;
   padding: 14px;
   border-bottom: 1px solid var(--line);
@@ -204,7 +205,7 @@ button:disabled {
 .select-with-icon {
   min-height: 38px;
   border: 1px solid var(--line);
-  background: #f9fbfd;
+  background: #f7fbff;
   padding: 0 10px;
 }
 
@@ -221,7 +222,7 @@ input,
 textarea {
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #fbfcfd;
+  background: #f8fbff;
   color: var(--ink);
 }
 
@@ -307,8 +308,8 @@ table {
 }
 
 th {
-  background: #edf2f6;
-  color: #334962;
+  background: #e5f0fc;
+  color: #244a73;
   text-align: left;
   padding: 10px;
   font-size: 12px;
@@ -343,7 +344,7 @@ tbody tr {
 
 tbody tr:hover,
 tbody tr.selected {
-  background: #f3f8fc;
+  background: #edf6ff;
 }
 
 .status {
@@ -405,6 +406,20 @@ tbody tr.selected {
   gap: 6px;
 }
 
+.header-actions {
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.profile-notes {
+  max-width: 760px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -415,7 +430,7 @@ tbody tr.selected {
 
 .metric {
   border: 1px solid var(--line);
-  background: #fbfcfd;
+  background: #f8fbff;
   min-height: 86px;
   padding: 14px;
   display: grid;
@@ -475,6 +490,20 @@ tbody tr.selected {
   margin-bottom: 8px;
 }
 
+.fieldset-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.fieldset-title-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .panel-title-row h2 {
   margin: 0;
 }
@@ -493,7 +522,7 @@ tbody tr.selected {
 
 .member {
   border-left: 3px solid var(--blue);
-  background: #f8fbfd;
+  background: #f3f8fe;
   padding: 10px;
   min-height: 72px;
   display: grid;
@@ -527,7 +556,7 @@ tbody tr.selected {
   justify-content: space-between;
   gap: 12px;
   border: 1px solid var(--line);
-  background: #fbfcfd;
+  background: #f8fbff;
   padding: 12px;
 }
 
@@ -562,7 +591,7 @@ tbody tr.selected {
 .drawer-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(16, 34, 56, 0.32);
+  background: rgba(8, 52, 97, 0.34);
 }
 
 .drawer {
@@ -601,6 +630,55 @@ tbody tr.selected {
 .page-form {
   padding: 22px;
   overflow: visible;
+}
+
+.client-profile-form {
+  display: grid;
+  gap: 14px;
+}
+
+.client-profile-form .panel-title-row {
+  margin-bottom: 0;
+}
+
+.client-profile-form fieldset {
+  min-width: 0;
+}
+
+.client-profile-form .form-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 0;
+}
+
+.edit-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.edit-table {
+  min-width: 760px;
+}
+
+.edit-table th {
+  position: static;
+}
+
+.edit-table td {
+  padding: 8px;
+}
+
+.edit-table input {
+  width: 100%;
+  min-width: 92px;
+}
+
+.edit-table td:last-child {
+  width: 46px;
+}
+
+.danger-button {
+  color: var(--red);
 }
 
 .form-grid {
@@ -737,9 +815,14 @@ label {
 
   .detail-header,
   .section-heading,
-  .history-row {
+  .history-row,
+  .fieldset-title-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
   }
 
   .panel,

@@ -40,7 +40,7 @@ def set_font(canvas: Canvas, size: int = 10, bold: bool = False, color=INK) -> N
 
 def draw_header(canvas: Canvas, client: Client, title: str, run: ReportRun, page_label: str) -> None:
     set_font(canvas, 20, True, BLUE)
-    canvas.drawString(54, PAGE_HEIGHT - 60, "WealthPortal")
+    canvas.drawString(54, PAGE_HEIGHT - 60, "Client Report Portal")
     set_font(canvas, 10, False, MUTED)
     canvas.drawRightString(PAGE_WIDTH - 54, PAGE_HEIGHT - 58, clean(client.household_name, 46))
     canvas.drawRightString(PAGE_WIDTH - 54, PAGE_HEIGHT - 73, f"{run.quarter} / {fmt_date(run.meeting_date)}")

@@ -22,9 +22,6 @@ class Client(Base):
     household_name: Mapped[str] = mapped_column(String(160), nullable=False)
     primary_contact: Mapped[str] = mapped_column(String(120), nullable=False)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="Active")
-    tier: Mapped[str] = mapped_column(String(20), nullable=False, default="Core")
-    assigned_team_member: Mapped[str] = mapped_column(String(80), nullable=False)
-    next_meeting_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     last_report_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -48,7 +45,6 @@ class Client(Base):
 
 Index("ix_clients_household_name", Client.household_name)
 Index("ix_clients_status", Client.status)
-Index("ix_clients_next_meeting_date", Client.next_meeting_date)
 Index("ix_clients_last_report_date", Client.last_report_date)
 
 

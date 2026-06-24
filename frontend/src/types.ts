@@ -2,10 +2,8 @@ export type ClientListItem = {
   id: string;
   household_name: string;
   primary_contact: string;
+  spouse_contact: string;
   status: string;
-  tier: string;
-  assigned_team_member: string;
-  next_meeting_date: string | null;
   last_report_date: string | null;
   member_count: number;
   account_count: number;
@@ -89,10 +87,8 @@ export type ClientDetail = {
   id: string;
   household_name: string;
   primary_contact: string;
+  spouse_contact: string;
   status: string;
-  tier: string;
-  assigned_team_member: string;
-  next_meeting_date: string | null;
   last_report_date: string | null;
   notes: string;
   members: HouseholdMember[];
@@ -112,10 +108,50 @@ export type ClientDetail = {
   readiness_status: string;
 };
 
+export type ClientUpdatePayload = {
+  household_name: string;
+  status: string;
+  last_report_date: string | null;
+  primary_first_name: string;
+  primary_last_name: string;
+  primary_date_of_birth: string | null;
+  spouse_first_name: string;
+  spouse_last_name: string;
+  spouse_date_of_birth: string | null;
+  notes: string;
+  accounts: AccountUpdatePayload[];
+  liabilities: LiabilityUpdatePayload[];
+  trust_assets: TrustAssetUpdatePayload[];
+};
+
+export type AccountUpdatePayload = {
+  id?: string;
+  owner: string;
+  category: string;
+  name: string;
+  institution: string;
+  account_type: string;
+  balance: number;
+  as_of_date: string | null;
+};
+
+export type LiabilityUpdatePayload = {
+  id?: string;
+  name: string;
+  liability_type: string;
+  balance: number;
+  as_of_date: string | null;
+};
+
+export type TrustAssetUpdatePayload = {
+  id?: string;
+  name: string;
+  value: number;
+  as_of_date: string | null;
+};
+
 export type Meta = {
   statuses: string[];
-  tiers: string[];
-  team: string[];
 };
 
 export type ReportPrefill = {

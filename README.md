@@ -1,4 +1,4 @@
-# WealthPortal Client Report Portal
+# Client Report Portal
 
 FastAPI, SQLite, and React prototype for managing client households, entering quarterly financial data, calculating report totals, and generating local SACS/TCC PDF reports.
 
