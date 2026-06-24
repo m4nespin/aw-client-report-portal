@@ -7,10 +7,12 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .calculations import AccountValue, LiabilityValue, TrustValue, calculate_household_summary, calculate_sacs
+from .config import FRONTEND_DIST_DIR
 from .database import SessionLocal, create_db, get_db
 from .models import Account, Client, GeneratedReport, HouseholdMember, Liability, ReportRun, TrustAsset, new_id, utc_now
 from .pdf import file_size, generate_sacs_pdf, generate_tcc_pdf, report_paths
@@ -476,3 +478,30 @@ def download_report(report_id: str, db: Session = Depends(get_db)) -> FileRespon
     if not path.exists():
         raise HTTPException(status_code=404, detail={"code": "report_file_missing", "message": "The report metadata exists, but the local file is missing."})
     return FileResponse(path, media_type="application/pdf", filename=report.filename)
+
+
+def frontend_index_path() -> Path:
+    index_path = FRONTEND_DIST_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail={"code": "frontend_not_built", "message": "Frontend build was not found."})
+    return index_path
+
+
+if (FRONTEND_DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="frontend-assets")
+
+
+@app.get("/", include_in_schema=False)
+def serve_frontend_root() -> FileResponse:
+    return FileResponse(frontend_index_path())
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend(full_path: str) -> FileResponse:
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Not found."})
+
+    requested_path = FRONTEND_DIST_DIR / full_path
+    if requested_path.is_file():
+        return FileResponse(requested_path)
+    return FileResponse(frontend_index_path())
